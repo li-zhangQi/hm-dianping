@@ -9,12 +9,20 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.geo.Point;
+import org.springframework.data.redis.connection.RedisGeoCommands;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.context.junit4.SpringJUnit4ClassRunner;
 
+import javax.annotation.Resource;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import static com.hmdp.utils.RedisConstants.CACHE_SHOP_KEY;
 
@@ -29,6 +37,9 @@ public class HmDianPingApplicationTests {
 
     @Autowired
     private RedisIdWorker redisIdWorker;
+
+    @Resource
+    private StringRedisTemplate stringRedisTemplate;
 
     /*@Test
     public void testSavaShop2Redis() throws InterruptedException {
@@ -69,4 +80,63 @@ public class HmDianPingApplicationTests {
         long end = System.currentTimeMillis();
         System.out.println("time = " + (end - begin));
     }
+
+    //将商铺数据导入Redis
+    @Test
+    public void loadShopData() {
+        //1.查询店铺信息
+        List<Shop> list = shopService.list();
+        //2.把店铺分组，按照type工d分组，id一致的放到一个集合
+        Map<Long, List<Shop>> map =  list.stream().collect(Collectors.groupingBy(Shop::getTypeId));
+        //3.分批完成写入Redis
+        for (Map.Entry<Long, List<Shop>> entry : map.entrySet()) {
+            //获取类型Id
+            Long typeId = entry.getKey();
+            String key = "shop:geo:" + typeId;
+            //获取同类型的店铺集合
+            List<Shop> value = entry.getValue();
+            //写入redis GEOADD key经度纬度member
+            List<RedisGeoCommands.GeoLocation<String>> iterable = new ArrayList<>(value.size());
+            for (Shop shop : value) {
+                //内部，普通多次从数据库查取方法
+                //stringRedisTemplate.opsForGeo().add(key, new Point(shop.getX(), shop.getY()), shop.getId().toString());
+                iterable.add(new RedisGeoCommands.GeoLocation<>(shop.getId().toString(), new Point(shop.getX(), shop.getY())));
+            }
+            //外部，一次查完整个集合方法。Iterable指定为可迭代的集合
+            stringRedisTemplate.opsForGeo().add(key, iterable);
+        }
+    }
+
+    //模拟UV统计
+    @Test
+    public void testHyperLogLog() {
+        String[] values = new String[1000];
+        int j = 0;
+        for (int i = 0; i < 1000000; i++) {
+            j = i % 1000;
+             values[j] = "user_" + i;
+            if (j == 999) {
+                //发送给Redis
+                stringRedisTemplate.opsForHyperLogLog().add("hl2", values);
+            }
+        }
+        //统计数量
+        Long count  = stringRedisTemplate.opsForHyperLogLog().size("hl2");
+        System.out.println("count = " + count);
+    }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
