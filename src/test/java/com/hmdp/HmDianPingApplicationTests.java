@@ -53,7 +53,7 @@ public class HmDianPingApplicationTests {
     }
 
 
-    //测试生成的全局ID
+    //测试生成的全局ID ..
     //1创建线程池-
     private ExecutorService es = Executors.newFixedThreadPool(500);
 
