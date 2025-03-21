@@ -11,8 +11,11 @@ import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IVoucherOrderService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.utils.RedisIdWorker;
+import com.hmdp.utils.SimpleRedisLock;
 import com.hmdp.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.aop.framework.AopContext;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
@@ -51,6 +54,9 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     private RedisIdWorker redisIdWorker;
     @Resource
     private StringRedisTemplate stringRedisTemplate;
+    @Resource
+    private RedissonClient redissonClient;
+
 
     //指定Lua脚本
     private static final DefaultRedisScript<Long> SECKILL_SCRIPT;
@@ -174,7 +180,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
 
     /**
-     * 根据优惠券Id下单秒杀优惠券 - 使用Lua脚本优化 - 使用Stream消息队列消费者组继续优化
+     * 根据优惠券Id下单秒杀优惠券 - 分布式锁 - 使用Lua脚本优化 - 使用Redisson优化 - 使用Stream消息队列消费者组继续优化
      * @param voucherId
      * @return
      */
@@ -237,6 +243,78 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
         //3.返回订单id
         return Result.ok(orderId);
+    }*/
+    /*@Override
+    public Result seckillVoucher(Long voucherId) {
+        //1.查询优惠券
+        SeckillVoucher voucher = seckillVoucherService.getById(voucherId);
+        //2.判断秒杀是否开始
+        LocalDateTime beginTime = voucher.getBeginTime();
+        if (beginTime.isAfter(LocalDateTime.now())) {
+            return Result.fail("优惠券秒杀尚未开始！");
+        }
+        //3.判断秒杀是否己经结束
+        LocalDateTime endTime = voucher.getEndTime();
+        if (endTime.isBefore(LocalDateTime.now())) {
+            return Result.fail("优惠券秒杀已经结束！");
+        }
+        //4.判断库存是否充足
+        if (voucher.getStock() < 1) {
+            return Result.fail("优惠券库存不足！");
+        }
+
+        Long userID = UserHolder.getUser().getId();
+
+        RLock lock = redissonClient.getLock("lock:order:" + userID);
+        //获取锁
+        boolean isLock = lock.tryLock();
+        if (!isLock) {
+            return Result.fail("不允许重复下单");
+        }
+        try {
+            //内部方法调用（this目标对象）的事务会实现，使用其代理对象调用内部方法可完成事务操作
+            IVoucherOrderService proxy = (IVoucherOrderService) AopContext.currentProxy();
+            return proxy.creatVoucherOrder(voucherId);
+        } finally {
+            lock.unlock();
+        }
+    }*/
+    /*@Override
+    public Result seckillVoucher(Long voucherId) {
+        //1.查询优惠券
+        SeckillVoucher voucher = seckillVoucherService.getById(voucherId);
+        //2.判断秒杀是否开始
+        LocalDateTime beginTime = voucher.getBeginTime();
+        if (beginTime.isAfter(LocalDateTime.now())) {
+            return Result.fail("优惠券秒杀尚未开始！");
+        }
+        //3.判断秒杀是否己经结束
+        LocalDateTime endTime = voucher.getEndTime();
+        if (endTime.isBefore(LocalDateTime.now())) {
+            return Result.fail("优惠券秒杀已经结束！");
+        }
+        //4.判断库存是否充足
+        if (voucher.getStock() < 1) {
+            return Result.fail("优惠券库存不足！");
+        }
+
+        //依据用户ID生成悲观锁；注意需要同一个值且地址值一样的值；先获取锁，再等事务操作完成，最后释放锁
+        Long userID = UserHolder.getUser().getId();
+
+        //自己创建锁对象
+        SimpleRedisLock lock = new SimpleRedisLock("order:" + userID, stringRedisTemplate);
+        //获取锁，过期时间具体根据业务设置
+        boolean isLock = lock.tryLock(1200);
+        if (!isLock) {
+            return Result.fail("不允许重复下单");
+        }
+        try {
+            //内部方法调用（this目标对象）的事务会实现，使用其代理对象调用内部方法可完成事务操作
+            IVoucherOrderService proxy = (IVoucherOrderService) AopContext.currentProxy();
+            return proxy.creatVoucherOrder(voucherId);
+        } finally {
+            lock.unlock();
+        }
     }*/
     /*@Override
     public Result seckillVoucher(Long voucherId) {
