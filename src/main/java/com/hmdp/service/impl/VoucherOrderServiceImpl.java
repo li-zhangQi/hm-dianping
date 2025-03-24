@@ -151,8 +151,14 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         }
     };
 
+//    @PostConstruct
+//    private void init() {
+//        SECKILL_ORDER_EXECUTOR.submit(tasks);
+//    }
+
     /*//阻塞队列
     private BlockingQueue<VoucherOrder> orderTasks = new ArrayBlockingQueue<>(1024 * 1024);
+
     Runnable tasks = new Runnable() {
         @Override
         public void run() {
@@ -169,12 +175,44 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             }
         }
     };*/
+    /*private class VoucherOrderHandler implements Runnable {
+        @Override
+        public void run() {
+            while(true) {
+                try {
+                    //获取队列中的订单信息，使用阻塞方法
+                    VoucherOrder voucherOrder = orderTasks.take();
+                    //数据库中创建真正的订单记录
+                    handleVoucherOrder(voucherOrder);
+                } catch (Exception e) {
+                    log.error("处理订单异常！", e);
+                }
 
+            }
+        }
+    };*/
+
+    /*
+    处理优惠券ID，注意里面的线程为线程池创建的子线程，有些数据不再能直接通过主线程索取
+     */
     private void handleVoucherOrder(VoucherOrder voucherOrder) {
-        Long userId = voucherOrder.getUserId();
-        synchronized (userId.toString().intern()) {
-            //抢购时订单已下单，不需要再下单
+        //1.获取用户
+        Long userID = voucherOrder.getUserId();
+        //2.创建锁对象
+        RLock lock = redissonClient.getLock("lock:order:" + userID);
+        //3.获取锁
+        boolean isLock = lock.tryLock();
+        //4.判断是否获取锁成功
+        if (!isLock) {
+            //获取锁失败
+            log.error("不允许重复下单");
+            return;
+        }
+        try {
+            //事务代理对象要提前获取
             proxy.creatVoucherOrder(voucherOrder);
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -225,7 +263,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             //2.1.不为0，代表没有购买资格
             return Result.fail(r == 1 ? "库存不足！" : "不能重复下单！");
         }
-        //一、 TODO  2.2.为0，有购买资格，把下单信息保存到阻塞队列
+        //一、 TODO  2.2 为0，有购买资格，把下单信息保存到阻塞队列 -- 已完成
         //创建订单
         VoucherOrder voucherOrder = new VoucherOrder();
         //设置订单ID，使用自建的全局ID生成器类
@@ -388,7 +426,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     }*/
 
     /**
-     * 二、 TODO 异步将已完成的订单写入数据库，异步处理不需要改前端返回值
+     * 二、 TODO 异步将已完成的订单写入数据库，异步处理不需要改前端返回值 -- 已完成
      * @param voucherOrder
      */
     @Transactional
